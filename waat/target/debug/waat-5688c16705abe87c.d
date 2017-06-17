@@ -1,0 +1,1 @@
+/home/dlacreme/Projects/waat/waat/target/debug/waat-5688c16705abe87c: /home/dlacreme/Projects/waat/waat/src/listen/mod.rs /home/dlacreme/Projects/waat/waat/src/recognize/mod.rs /home/dlacreme/Projects/waat/waat/src/lib.rs
