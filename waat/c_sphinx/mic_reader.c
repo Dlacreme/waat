@@ -8,19 +8,8 @@
 ** Last update T7 Th07 08 23:24:49 2017 Creme
 */
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <assert.h>
-#include <sys/select.h>
-#include <unistd.h>
+#include "mic_reader.h"
 
-#include <sphinxbase/err.h>
-#include <sphinxbase/ad.h>
-#include <pocketsphinx.h>
-
-
-static void recognize_from_microphone();
 
 /* BASE */
 
@@ -47,13 +36,6 @@ int	clean(cmd_ln_t* config, ps_decoder_t *ps)
 	return (0);
 }
 
-void panic(char* str)
-{
-	fprintf(stderr, "%s\n", str);
-	exit(-42);
-}
-
-
 int		main(int argc, char *argv[])
 {
     cmd_ln_t* config = NULL;
@@ -62,11 +44,11 @@ int		main(int argc, char *argv[])
 
 	// Init
 	if ((config = set_config()) == NULL)
-		panic("Fail while setting the config");
+		E_FATAL("Fail while setting the config");
 
 	// Decoder
 	if ((ps = create_decoder(config)) == NULL)
-		panic("Fail while creating the decoder");
+		E_FATAL("Fail while creating the decoder");
 
 	// Hello sir,
 	printf("READY TO GO SIR\n");
@@ -85,56 +67,64 @@ int		main(int argc, char *argv[])
  *        print utterance result;
  *     }
  */
-static void
-recognize_from_microphone(cmd_ln_t* config, ps_decoder_t* ps)
+static void*    recognize_from_microphone(cmd_ln_t* config, ps_decoder_t* ps)
 {
+    void*           final_data;
+    ps_lattice_t*   data;
     ad_rec_t *ad;
     int16 adbuf[2048];
     uint8 utt_started, in_speech;
     int32 k;
     char const *hyp;
 
-    /*if ((ad = ad_open_dev("/dev/input/event14",
-                          (int) cmd_ln_float32_r(config,
-                                                 "-samprate"))) == NULL)*/
+
     if ((ad = ad_open_sps((int) cmd_ln_float32_r(config, "-samprate"))) == NULL)
         E_FATAL("Failed to open audio device\n");
     if (ad_start_rec(ad) < 0)
         E_FATAL("Failed to start recording\n");
-
     if (ps_start_utt(ps) < 0)
         E_FATAL("Failed to start utterance\n");
     utt_started = FALSE;
+
     E_INFO("Ready....\n");
 
     for (;;) {
-        E_INFO("START LOOP");
+
+        // We try to read audio
         if ((k = ad_read(ad, adbuf, 2048)) < 0)
             E_FATAL("Failed to read audio\n");
-        ps_process_raw(ps, adbuf, k, FALSE, FALSE);
+
+        // Switch from []int16 to []char
+        if (ps_process_raw(ps, adbuf, k, FALSE, FALSE) < 0)
+            E_FATAL("FAIL TO READ AUDIO");
+
+        // Do we have speech?
         in_speech = ps_get_in_speech(ps);
+
+        // someone is CURRENTLY talking. So we keep listening using UTT
         if (in_speech && !utt_started) {
             utt_started = TRUE;
             E_INFO("Listening...\n");
         }
-        else if (!in_speech && utt_started) {
-            /* speech -> silence transition, time to start new utterance  */
-            E_INFO("I GOT THE POWER.");
-            ps_end_utt(ps);
-            hyp = ps_get_hyp(ps, NULL );
-            if (hyp != NULL) {
-                printf("%s\n", hyp);
-                fflush(stdout);
-            }
 
+        // No one is talking anymore. If UTT is set to true, then we have to do process
+        if (!in_speech && utt_started) {
+            // Stop UTT
+            ps_end_utt(ps);
+
+            // We get the data without any process (use ps_get_hyp to get best hypotesis)
+            if ((data = ps_get_lattice(ps)) == NULL)
+                E_FATAL("Failed to get data");
+            // Did we call our BOT?
+            if ((final_data = get_garde_a_vous(data)) != NULL)
+                return (final_data);
+
+            // WE RESET UTT
             if (ps_start_utt(ps) < 0)
                 E_FATAL("Failed to start utterance\n");
             utt_started = FALSE;
             E_INFO("Ready....\n");
-        } else {
-            E_INFO("Nothing to do.");
         }
-        E_INFO("END OF LOOP");
         usleep(10000);
     }
     ad_close(ad);
